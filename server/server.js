@@ -36,7 +36,7 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
-// Route to upload PDF template (optional - you can also manually place your template in the uploads folder)
+// Route to upload PDF template
 app.post('/api/upload-template', upload.single('pdfTemplate'), (req, res) => {
   if (!req.file) {
     return res.status(400).send('No PDF template uploaded');
@@ -44,10 +44,54 @@ app.post('/api/upload-template', upload.single('pdfTemplate'), (req, res) => {
   res.status(200).send('Template uploaded successfully');
 });
 
+// New route to discover PDF form fields
+app.get('/api/discover-fields', async (req, res) => {
+  try {
+    // Path to your PDF template
+    const templatePath = path.join(__dirname, 'uploads', 'template.pdf');
+    
+    // Check if template exists
+    if (!fs.existsSync(templatePath)) {
+      return res.status(404).send('PDF template not found. Please upload a template first.');
+    }
+    
+    // Read the PDF template
+    const pdfBytes = fs.readFileSync(templatePath);
+    
+    // Load the PDF document
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    
+    // Get the form
+    const form = pdfDoc.getForm();
+    
+    // Get all form fields
+    const fields = form.getFields();
+    
+    // Extract field information
+    const fieldInfo = fields.map(field => {
+      return {
+        name: field.getName(),
+        type: field.constructor.name,
+      };
+    });
+    
+    res.json(fieldInfo);
+  } catch (error) {
+    console.error('Error discovering PDF fields:', error);
+    res.status(500).send(`Error discovering fields: ${error.message}`);
+  }
+});
+
 // Route to fill the PDF with form data
 app.post('/api/fill-pdf', async (req, res) => {
   try {
     const formData = req.body;
+    const fieldMappings = req.body.fieldMappings || {};
+    
+    // Remove fieldMappings from formData to avoid treating it as a field
+    if (formData.fieldMappings) {
+      delete formData.fieldMappings;
+    }
     
     // Path to your PDF template
     const templatePath = path.join(__dirname, 'uploads', 'template.pdf');
@@ -66,18 +110,35 @@ app.post('/api/fill-pdf', async (req, res) => {
     // Get the form fields
     const form = pdfDoc.getForm();
     
-    // Fill the form fields based on the provided form data
-    // You'll need to adjust these field names to match your specific PDF template
-    Object.keys(formData).forEach(fieldName => {
-      try {
-        const field = form.getTextField(fieldName);
-        if (field) {
-          field.setText(formData[fieldName].toString());
+    // Fill form fields based on mappings if provided, otherwise use direct field names
+    if (Object.keys(fieldMappings).length > 0) {
+      // Using field mappings
+      Object.keys(fieldMappings).forEach(formKey => {
+        const pdfFieldName = fieldMappings[formKey];
+        if (pdfFieldName && formData[formKey] !== undefined) {
+          try {
+            const field = form.getTextField(pdfFieldName);
+            if (field) {
+              field.setText(formData[formKey].toString());
+            }
+          } catch (err) {
+            console.warn(`Field "${pdfFieldName}" not found or could not be filled: ${err.message}`);
+          }
         }
-      } catch (err) {
-        console.warn(`Field "${fieldName}" not found or could not be filled: ${err.message}`);
-      }
-    });
+      });
+    } else {
+      // Direct field mapping (form key = PDF field name)
+      Object.keys(formData).forEach(fieldName => {
+        try {
+          const field = form.getTextField(fieldName);
+          if (field) {
+            field.setText(formData[fieldName].toString());
+          }
+        } catch (err) {
+          console.warn(`Field "${fieldName}" not found or could not be filled: ${err.message}`);
+        }
+      });
+    }
     
     // Flatten the form (makes the filled fields non-editable)
     form.flatten();
