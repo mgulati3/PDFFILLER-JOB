@@ -38,11 +38,13 @@ if (!fs.existsSync(uploadsDir)) {
 
 // Route to upload PDF template
 app.post('/api/upload-template', upload.single('pdfTemplate'), (req, res) => {
+  console.log('🔔 Got upload request:', req.file);
   if (!req.file) {
     return res.status(400).send('No PDF template uploaded');
   }
   res.status(200).send('Template uploaded successfully');
 });
+
 
 // New route to discover PDF form fields
 app.get('/api/discover-fields', async (req, res) => {
